@@ -24,7 +24,7 @@ import argparse
 import logging
 import sys
 
-from physical_engine import __version__
+from physic_engine import __version__
 
 __author__ = "Robin CREMESE"
 __copyright__ = "Robin CREMESE"
