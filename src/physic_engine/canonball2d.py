@@ -5,7 +5,7 @@ import numpy as np
 
 
 GRAVITY = tm.vec2([0, -9.81])
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 1080, 720
 
 
 @ti.dataclass
@@ -46,11 +46,13 @@ def learp(x, y, t):
 
 @ti.data_oriented
 class CanonBall2D:
+    _scale_vector = np.array([WIDTH, HEIGHT])
+    obs_size = 100
+
     def __init__(
         self,
         init_pos: np.ndarray,
         n_balls: int = 1,
-        n_obstacles: int = 1,
         dt: float = 1,
         substeps: int = 1,
     ) -> None:
@@ -59,10 +61,12 @@ class CanonBall2D:
         assert n_balls > 0, "n_balls must be positive"
         self.n_balls = n_balls
         self.balls = Ball.field(shape=(n_balls))
+        self._old_pos = ti.Vector.field(n=2, dtype=ti.f32, shape=(n_balls))
         # Obstacles
-        assert n_obstacles > 0, "n_obstacles must be positive"
-        self.n_obstacles = n_obstacles
-        self.obstacles = Box.field(shape=(n_obstacles))
+        self.obstacle = Box(
+            tm.vec2((self._scale_vector - self.obs_size) / 2),
+            tm.vec2((self._scale_vector + self.obs_size) / 2),
+        )
 
         self.box = Box(tm.vec2(0), tm.vec2([WIDTH, HEIGHT]))
         assert dt > 0, "dt must be positive"
@@ -78,44 +82,36 @@ class CanonBall2D:
             self.balls[n].inv_mass = 10.0
             self.balls[n].radius = 1
 
-        for o in self.obstacles:
-            a = tm.vec2([ti.random() * WIDTH, ti.random() * HEIGHT])
-            b = tm.vec2([ti.random() * WIDTH, ti.random() * HEIGHT])
-            self.obstacles[o] = Box(tm.min(a, b), tm.max(a, b))
+            self._old_pos[n] = self.balls[n].pos
 
     def run(self):
         self.reset()
         gui = ti.GUI("CanonBall2D", res=(WIDTH, HEIGHT))
         while gui.running:
             self.update()
-            pos = self.balls.pos.to_numpy() / np.array([WIDTH, HEIGHT])
+            pos = self.balls.pos.to_numpy() / self._scale_vector
+            # Balls
             gui.circles(
                 pos,
                 radius=10,
                 color=0xED553B,
             )
+            # Velocity
             gui.arrows(
                 orig=pos,
-                direction=self.balls.vel.to_numpy() / np.array([WIDTH, HEIGHT]),
+                direction=self.balls.vel.to_numpy() / self._scale_vector,
                 color=0xEEEEF0,
                 radius=1,
             )
-            obstacles = self.obstacles.to_numpy()
-            for o in range(self.n_obstacles):
-                top_left = (
-                    obstacles["min"][o, 0] / WIDTH,
-                    obstacles["max"][o, 1] / HEIGHT,
-                )
-                bottomright = (
-                    obstacles["max"][o, 0] / WIDTH,
-                    obstacles["min"][o, 0] / HEIGHT,
-                )
+            # Obstacle
+            top_left = self.obstacle.min.to_numpy() / self._scale_vector
+            bottomright = self.obstacle.max.to_numpy() / self._scale_vector
 
-                gui.rect(
-                    topleft=top_left,
-                    bottomright=bottomright,
-                    color=0x0000FF,
-                )
+            gui.rect(
+                topleft=top_left,
+                bottomright=bottomright,
+                color=0x0000FF,
+            )
             gui.show()
 
     def update(self):
@@ -132,11 +128,14 @@ class CanonBall2D:
             self.balls[n].vel += GRAVITY * self.balls[n].inv_mass * dt
             self.balls[n].pos += self.balls[n].vel * dt
             ## Collision detection
-
-            self.collision(n)
+            self.box_collision(n)
+            if self.obstacle.ball_collision(self.balls[n]):
+                self.obstacle_collision(n)
+            # Update the old position
+            self._old_pos[n] = self.balls[n].pos
 
     @ti.func
-    def collision(self, n: int):
+    def box_collision(self, n: int):
         # Left
         if self.balls[n].pos[0] < self.balls[n].radius:
             self.balls[n].pos[0] = self.balls[n].radius
@@ -154,13 +153,40 @@ class CanonBall2D:
             self.balls[n].pos[1] = self.box.height() - self.balls[n].radius
             self.balls[n].vel[1] *= -1
 
+    @ti.func
+    def obstacle_collision(self, n: int):
+        # Check collision along x axis
+        if (
+            self._old_pos[n].x < self.obstacle.min.x
+            and self.balls[n].pos.x >= self.obstacle.min.x
+        ):
+            self.balls[n].pos.x = self.obstacle.min.x
+            self.balls[n].vel.x *= -1
+        elif (
+            self._old_pos[n].x > self.obstacle.max.x
+            and self.balls[n].pos.x <= self.obstacle.max.x
+        ):
+            self.balls[n].pos.x = self.obstacle.max.x
+            self.balls[n].vel.x *= -1
+        # Check collision along y axis
+        if (
+            self._old_pos[n].y < self.obstacle.min.y
+            and self.balls[n].pos.y >= self.obstacle.min.y
+        ):
+            self.balls[n].pos.y = self.obstacle.min.y
+            self.balls[n].vel.y *= -1
+        elif (
+            self._old_pos[n].y > self.obstacle.max.y
+            and self.balls[n].pos.y <= self.obstacle.max.y
+        ):
+            self.balls[n].pos.y = self.obstacle.max.y
+            self.balls[n].vel.y *= -1
+
 
 if __name__ == "__main__":
     ti.init(ti.gpu)
     ball = Ball(radius=1)
     box = Box.field(shape=())
     fps = 60
-    canonball2d = CanonBall2D(
-        np.array([WIDTH / 2, HEIGHT / 2]), dt=1 / fps, substeps=1, n_obstacles=1
-    )
+    canonball2d = CanonBall2D(np.array([1, HEIGHT - 1]), dt=1 / fps, substeps=1)
     canonball2d.run()
