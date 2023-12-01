@@ -1,3 +1,6 @@
+# Project directories
+outputs/*
+
 # Temporary and binary files
 *~
 *.py[cod]

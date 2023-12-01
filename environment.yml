@@ -1,0 +1,13 @@
+name: physic-env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - tox
+  - ca-certificates
+  - openssl
+  - pip:
+    - taichi
+    - warp-lang
+    - usd-core
+prefix: /home/rcremese/mambaforge/envs/physic-env
